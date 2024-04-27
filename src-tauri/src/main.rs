@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::thread;
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context, Result};
 use otadump::core::ExtractOptions;
 use otadump::gui;
 use tauri::AppHandle;
@@ -18,8 +18,17 @@ fn extract(app: AppHandle, payload_file: PathBuf, output_dir: PathBuf) {
 }
 
 fn main() -> Result<()> {
+    // let options = ExtractOptions {
+    //     payload_file:
+    // "/home/ajeet/ws/otadump-payloads/bluejay-ota-sd2a.220601.001.a1-bacd4108.zip"
+    //         .into(),
+    //     output_dir: "/tmp/asdf".into(),
+    // };
+    // otadump::tui::extract(options);
+    // Ok(())
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![extract])
         .run(tauri::generate_context!())
-        .context("error running application")
+        .context("Error running application")
 }

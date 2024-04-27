@@ -15,9 +15,13 @@
       "dialog": {
         "open": true
       },
+      "process": {
+        "all": false,
+        "exit": true
+      },
       "shell": {
         "all": false,
-        "open": true
+        "open": ".*"
       }
     },
     "windows": [

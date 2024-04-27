@@ -41,8 +41,8 @@ impl crate::core::Reporter for Reporter {
     }
 
     fn report_error(&self, error: Box<dyn Error>) {
-        let error = format!("{}", error);
-        let message = Message::Error { error };
+        let error = format!("{:?}", error);
+        let message = Message::Error { message: error };
         self.emit_all(message);
     }
 }
@@ -52,5 +52,5 @@ impl crate::core::Reporter for Reporter {
 enum Message {
     Progress { value: f64 },
     Completed,
-    Error { error: String },
+    Error { message: String },
 }

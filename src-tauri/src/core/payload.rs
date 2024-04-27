@@ -41,7 +41,7 @@ impl<'a> Payload<'a> {
         // TODO: this outputs the entire bytes of the file in the event of a
         // parser error. Use nom's VerboseError here.
         let (_, payload): (_, Payload) = Parse::parse(bytes)
-            .map_err(|e| anyhow!(e.to_string()).context("failed to parse payload"))?;
+            .map_err(|e| anyhow!(e.to_string()).context("Failed to parse payload"))?;
         Ok(payload)
     }
 }
