@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use nom_derive::{NomBE, Parse};
 
 /// Update file format: contains all the operations needed to update a system to

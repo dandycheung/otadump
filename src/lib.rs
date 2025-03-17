@@ -20,7 +20,7 @@ use bzip2::read::BzDecoder;
 use chromeos_update_engine::install_operation::Type;
 use chromeos_update_engine::{DeltaArchiveManifest, InstallOperation, PartitionUpdate};
 use liblzma::read::XzDecoder;
-use memmap2::{Mmap, MmapMut};
+use memmap2::{Mmap, MmapMut, MmapOptions};
 use prost::Message as _;
 use rayon::{BroadcastContext, ThreadPoolBuilder};
 use ring::digest;
@@ -173,31 +173,44 @@ impl<'a> ExtractOptions<'a> {
     }
 
     fn open_payload_file(path: &Path) -> Result<Mmap> {
-        let file = File::open(path)
+        let in_file = File::open(path)
             .with_context(|| format!("Failed to open file for reading: {path:?}"))?;
 
-        // Assume the file is a zip archive. If it's not, we get an
-        // InvalidArchive error, and we can treat it as a payload.bin file.
-        match ZipArchive::new(&file) {
+        // Assume the file is a zip archive. If it's not, we get an InvalidArchive
+        // error, and we can treat it as a payload.bin file.
+        match ZipArchive::new(&in_file) {
             Ok(mut archive) => {
-                let mut zipfile = archive
+                let mut zip_file = archive
                     .by_name("payload.bin")
                     .context("Could not find payload.bin file in archive")?;
 
-                let file = tempfile::tempfile().context("Failed to create temporary file")?;
-                let _ = file.set_len(zipfile.size());
-                let mut file =
-                    unsafe { MmapMut::map_mut(&file) }.context("Failed to mmap temporary file")?;
+                match zip_file.compression() {
+                    // Most OTA zip files use the STORED (no compression) method for the payload.bin
+                    // file, which means we can use it directly.
+                    zip::CompressionMethod::Stored => unsafe {
+                        MmapOptions::new()
+                            .offset(zip_file.data_start())
+                            .len(zip_file.compressed_size() as usize)
+                            .map(&in_file)
+                            .with_context(|| format!("Failed to mmap file: {path:?}"))
+                    },
+                    _ => {
+                        let out_file =
+                            tempfile::tempfile().context("Failed to create temporary file")?;
+                        out_file
+                            .set_len(zip_file.size())
+                            .context("Failed to set size of temporary file")?;
+                        let mut out_file = unsafe { MmapMut::map_mut(&out_file) }
+                            .context("Failed to mmap temporary file")?;
 
-                zipfile.read_exact(&mut file).context("Failed to write to temporary file")?;
-                ensure!(
-                    zipfile.bytes().next().is_none(),
-                    "Failed to extract temporary file: zip reported the wrong uncompressed size"
-                );
-
-                file.make_read_only().context("Failed to make temporary file read-only")
+                        zip_file
+                            .read_exact(&mut out_file)
+                            .context("Failed to write to temporary file")?;
+                        out_file.make_read_only().context("Failed to make temporary file read-only")
+                    }
+                }
             }
-            Err(ZipError::InvalidArchive(_)) => unsafe { Mmap::map(&file) }
+            Err(ZipError::InvalidArchive(_)) => unsafe { Mmap::map(&in_file) }
                 .with_context(|| format!("Failed to mmap file: {path:?}")),
             Err(e) => Err(e).with_context(|| format!("Failed to open payload file: {path:?}")),
         }
