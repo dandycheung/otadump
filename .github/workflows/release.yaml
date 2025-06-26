@@ -44,10 +44,8 @@ jobs:
           # Windows targets
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            triplet: x64-windows-static-md
           - os: windows-latest
             target: aarch64-pc-windows-msvc
-            triplet: arm64-windows-static-md
 
     steps:
       - name: Checkout repository
@@ -74,7 +72,7 @@ jobs:
 
       - name: Install build deps (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake protobuf
+        run: brew install protobuf
 
       - name: Install build deps (Linux)
         if: runner.os == 'Linux'
@@ -104,10 +102,6 @@ jobs:
         with:
           ndk-version: r23
           local-cache: true
-
-      - name: Install cmake (Windows)
-        if: runner.os == 'Windows'
-        uses: lukka/get-cmake@latest
 
       - name: Install protoc (Windows)
         if: runner.os == 'Windows'
