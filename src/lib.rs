@@ -8,9 +8,9 @@ mod payload;
 use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read};
+use std::io::Read;
 use std::num::NonZero;
-use std::ops::{Div as _, Mul as _};
+use std::ops::Mul;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -323,11 +323,9 @@ impl Task<'_> {
                     // verified.
                     if op_idx + 1 == self.update.operations.len() + ctx.num_threads() {
                         self.verify_partition()?;
+                        unsafe { (*self.partition.get()).flush() }
+                            .context("Error while flushing file to disk")?;
                     };
-
-                    // Flush file to disk.
-                    unsafe { (*self.partition.get()).flush() }
-                        .context("Error while flushing file to disk")?;
                     break;
                 }
             }
@@ -338,11 +336,10 @@ impl Task<'_> {
     fn run_op(&self, op: &InstallOperation) -> Result<()> {
         let mut dst_extents =
             self.extract_dst_extents(op).context("Error extracting dst_extents")?;
-
         match Type::try_from(op.r#type).context("Invalid operation")? {
             Type::Replace => {
-                let mut data = self.extract_data(op).context("Error extracting data")?;
-                self.run_op_replace(&mut data, &mut dst_extents)
+                let data = self.extract_data(op).context("Error extracting data")?;
+                self.run_op_replace(&mut &*data, &mut dst_extents)
                     .context("Error in REPLACE operation")
             }
             Type::ReplaceBz => {
@@ -370,19 +367,27 @@ impl Task<'_> {
     }
 
     fn run_op_replace(&self, reader: &mut impl Read, dst_extents: &mut [&mut [u8]]) -> Result<()> {
-        let mut bytes_read = 0usize;
-
         let dst_len = dst_extents.iter().map(|extent| extent.len()).sum::<usize>();
-        for extent in dst_extents.iter_mut() {
-            bytes_read += io::copy(reader, extent).context("Failed to write to buffer")? as usize;
-        }
-        ensure!(reader.bytes().next().is_none(), "Read fewer bytes than expected");
+        let mut bytes_written = 0usize;
 
-        // Align number of bytes read to block size. The formula for alignment is:
-        // ((operand + alignment - 1) / alignment) * alignment
-        let bytes_read_aligned =
-            (bytes_read + self.block_size - 1).div(self.block_size).mul(self.block_size);
-        ensure!(bytes_read_aligned == dst_len, "More dst blocks than data, even with padding");
+        for extent in dst_extents {
+            let mut extent = &mut **extent;
+            loop {
+                match reader.read(extent).context("Failed to write to buffer")? {
+                    0 => break,
+                    n => {
+                        bytes_written += n;
+                        extent = &mut extent[n..];
+                    }
+                }
+            }
+        }
+        ensure!(reader.read(&mut [0])? == 0, "Read fewer bytes than expected");
+
+        // Align number of bytes written to block size. The formula for alignment is:
+        //   ((operand + alignment - 1) / alignment) * alignment.
+        let bytes_written_aligned = bytes_written.div_ceil(self.block_size).mul(self.block_size);
+        ensure!(bytes_written_aligned == dst_len, "More dst blocks than data, even with padding");
 
         Ok(())
     }
@@ -474,7 +479,7 @@ impl Task<'_> {
     }
 
     fn increment_progress(&self) {
-        let total_ops_completed = self.total_ops_completed.fetch_add(1, Ordering::AcqRel) + 1;
+        let total_ops_completed = self.total_ops_completed.fetch_add(1, Ordering::Relaxed) + 1;
         if total_ops_completed % 16 == 0 {
             let progress = total_ops_completed as f64 / self.total_ops as f64;
             self.progress_reporter.report_progress(progress);
